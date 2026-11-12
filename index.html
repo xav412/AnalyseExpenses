@@ -1,0 +1,113 @@
+<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#1f6f5c"><meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="manifest" href="manifest.json"><title>Mes dépenses</title>
+<style>
+:root{--bg:#eef1ee;--card:#fff;--ink:#17231f;--mute:#5d6b65;--line:#d9dfdb;--ac:#1f6f5c;--bad:#b4233c;--ok:#1f6f5c}
+@media(prefers-color-scheme:dark){:root{--bg:#0f1714;--card:#18231f;--ink:#e8efeb;--mute:#8fa097;--line:#2a3833;--ac:#4cc3a3;--bad:#ff6b81;--ok:#4cc3a3}}
+*{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 system-ui,-apple-system,sans-serif}
+body{padding:env(safe-area-inset-top) 0 calc(70px + env(safe-area-inset-bottom))}
+main{max-width:560px;margin:auto;padding:14px}
+h2{font-size:15px;margin:18px 0 8px;font-weight:650}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:10px}
+.num{font-variant-numeric:tabular-nums;font-weight:650}
+.big{font-size:34px;letter-spacing:-.5px}
+.row{display:flex;align-items:center;gap:8px;padding:9px 0;border-bottom:1px solid var(--line)}
+.row:last-child{border:0}.grow{flex:1;min-width:0}.mute{color:var(--mute);font-size:13px}
+.ell{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+input,select,button{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:9px;min-width:0}
+input{width:100%}button{background:var(--ac);color:#fff;border:0;font-weight:600}
+button.ghost{background:none;color:var(--mute);padding:4px 8px}
+.f{display:grid;grid-template-columns:1fr 1fr;gap:8px}.f .w{grid-column:1/3}
+select.c{padding:4px;font-size:13px;max-width:110px}
+nav{position:fixed;bottom:0;left:0;right:0;display:flex;background:var(--card);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom)}
+nav button{flex:1;background:none;color:var(--mute);border-radius:0;padding:14px 4px}nav button.on{color:var(--ac);box-shadow:inset 0 2px var(--ac)}
+.bar{height:8px;background:var(--line);border-radius:4px;overflow:hidden;margin-top:6px}.bar i{display:block;height:100%;background:var(--ok)}.bar i.over{background:var(--bad)}
+.mn{display:flex;justify-content:space-between;align-items:center}.mn button{width:42px}
+#msg{position:fixed;top:calc(8px + env(safe-area-inset-top));left:50%;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:6px 14px;border-radius:20px;font-size:13px;display:none}
+</style></head><body><main id="app"></main><div id="msg"></div>
+<nav><button data-t="dep">Dépenses</button><button data-t="rec">Récurrentes</button><button data-t="bud">Budget</button><button data-t="set">Réglages</button></nav>
+<script>
+const K='dep_v1',$=s=>document.querySelector(s);
+let S=JSON.parse(localStorage.getItem(K)||'null')||{tx:[],rec:[],income:0,cats:{Courses:35,Transport:15,Loisirs:25,Autres:25},rules:{},url:'',token:''};
+const save=()=>localStorage.setItem(K,JSON.stringify(S));
+const eur=n=>n.toLocaleString('fr-FR',{style:'currency',currency:'EUR'});
+const num=v=>Math.abs(parseFloat(String(v).replace(/[^\d,.-]/g,'').replace(',','.')))||0;
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const day=d=>{const t=new Date(d);return isNaN(t)?String(d).slice(0,10):t.toLocaleDateString('sv-SE')};
+const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+const catList=()=>[...Object.keys(S.cats),'Fixe'];
+let tab='dep',month=day(new Date()).slice(0,7);
+function msg(t){const m=$('#msg');m.textContent=t;m.style.display='block';setTimeout(()=>m.style.display='none',2200)}
+const opts=(sel)=>catList().map(c=>`<option ${c===sel?'selected':''}>${esc(c)}</option>`).join('');
+const monthly=r=>r.per==='a'?r.amount/12:r.amount;
+const mtx=()=>S.tx.filter(t=>t.date.startsWith(month)).sort((a,b)=>b.date.localeCompare(a.date));
+const label=()=>new Date(month+'-15').toLocaleDateString('fr-FR',{month:'long',year:'numeric'});
+function shift(d){const [y,m]=month.split('-').map(Number),t=new Date(y,m-1+d,15);month=day(t).slice(0,7);render()}
+const nav=()=>`<div class="mn"><button onclick="shift(-1)">‹</button><b>${label()}</b><button onclick="shift(1)">›</button></div>`;
+
+function vDep(){
+  const L=mtx(),tot=L.filter(t=>t.cat!=='Fixe').reduce((s,t)=>s+t.amount,0);
+  return nav()+`<div class="card"><div class="mute">Dépenses variables du mois</div><div class="big num">${eur(tot)}</div></div>
+  <div class="card"><div class="f"><input id="a" inputmode="decimal" placeholder="Montant €"><input id="m" placeholder="Commerçant">
+  <select id="c">${opts('Autres')}</select><input id="d" type="date" value="${day(new Date())}"><button class="w" onclick="addTx()">Ajouter la dépense</button></div></div>
+  <div class="card">${L.map(t=>`<div class="row"><div class="grow"><div class="ell">${esc(t.merchant)}</div><div class="mute">${t.date.slice(8)}/${t.date.slice(5,7)}${t.src==='applepay'?' · Apple Pay':''}</div></div>
+  <select class="c" onchange="setCat('${t.id}',this.value)">${opts(t.cat)}</select><span class="num">${eur(t.amount)}</span><button class="ghost" onclick="delTx('${t.id}')">✕</button></div>`).join('')||'<div class="mute">Aucune dépense ce mois-ci.</div>'}</div>`;
+}
+function vRec(){
+  const tot=S.rec.reduce((s,r)=>s+monthly(r),0);
+  return `<div class="card"><div class="mute">Charges fixes par mois</div><div class="big num">${eur(tot)}</div></div>
+  <div class="card"><div class="f"><input id="rn" placeholder="Nom (loyer, Netflix…)"><input id="ra" inputmode="decimal" placeholder="Montant €">
+  <select id="rp" class="w"><option value="m">Mensuel</option><option value="a">Annuel (÷ 12)</option></select><button class="w" onclick="addRec()">Ajouter la charge</button></div></div>
+  <div class="card">${S.rec.map(r=>`<div class="row"><div class="grow">${esc(r.name)}<div class="mute">${r.per==='a'?'annuel':'mensuel'}</div></div><span class="num">${eur(r.amount)}</span><button class="ghost" onclick="delRec('${r.id}')">✕</button></div>`).join('')||'<div class="mute">Aucune charge récurrente.</div>'}</div>`;
+}
+function vBud(){
+  const rec=S.rec.reduce((s,r)=>s+monthly(r),0),reste=S.income-rec,L=mtx(),sp={};
+  L.forEach(t=>sp[t.cat]=(sp[t.cat]||0)+t.amount);
+  const left=Object.keys(S.cats).reduce((s,c)=>s+Math.max(0,reste*S.cats[c]/100)-(sp[c]||0),0);
+  return nav()+`<div class="card"><div class="row"><span class="grow">Revenus</span><span class="num">${eur(S.income)}</span></div>
+  <div class="row"><span class="grow">Charges fixes</span><span class="num">− ${eur(rec)}</span></div>
+  <div class="row"><b class="grow">À répartir</b><span class="num">${eur(reste)}</span></div></div>
+  ${Object.keys(S.cats).map(c=>{const env=Math.max(0,reste*S.cats[c]/100),s=sp[c]||0,p=env?Math.min(100,s/env*100):(s?100:0);
+  return `<div class="card"><div class="row" style="border:0;padding:0"><b class="grow">${esc(c)} <span class="mute">${S.cats[c]} %</span></b><span class="num" style="color:${s>env?'var(--bad)':'inherit'}">${eur(s)} / ${eur(env)}</span></div>
+  <div class="bar"><i class="${s>env?'over':''}" style="width:${p}%"></i></div><div class="mute">${s>env?'Dépassé de '+eur(s-env):'Reste '+eur(env-s)}</div></div>`}).join('')}
+  <div class="card"><b>Reste global : <span class="num" style="color:${left<0?'var(--bad)':'var(--ok)'}">${eur(left)}</span></b></div>`;
+}
+function vSet(){
+  const sum=Object.values(S.cats).reduce((a,b)=>a+b,0);
+  return `<h2>Revenus mensuels nets</h2><div class="card"><input inputmode="decimal" value="${S.income||''}" placeholder="€" onchange="S.income=num(this.value);save()"></div>
+  <h2>Répartition du reste à vivre <span class="mute">(total ${sum} %${sum!==100?' — devrait faire 100':''})</span></h2><div class="card">
+  ${Object.keys(S.cats).map(c=>`<div class="row"><span class="grow">${esc(c)}</span><input style="width:70px" inputmode="numeric" value="${S.cats[c]}" onchange="S.cats['${esc(c)}']=num(this.value);save();render()"><button class="ghost" onclick="delCat('${esc(c)}')">✕</button></div>`).join('')}
+  <div class="f" style="margin-top:8px"><input id="nc" placeholder="Nouvelle catégorie"><button onclick="addCat()">Ajouter</button></div></div>
+  <h2>Synchro Apple Pay</h2><div class="card"><div class="f"><input class="w" id="u" placeholder="URL de l'application web Apps Script" value="${esc(S.url)}"><input class="w" id="k" type="password" placeholder="Token" value="${esc(S.token)}">
+  <button onclick="S.url=$('#u').value.trim();S.token=$('#k').value.trim();save();sync()">Enregistrer et synchroniser</button><button onclick="exportCsv()" style="background:var(--mute)">Export CSV</button></div></div>
+  <h2>Données</h2><div class="card"><button style="background:var(--bad)" onclick="if(confirm('Tout effacer sur cet appareil ?')){localStorage.removeItem(K);location.reload()}">Tout effacer</button></div>`;
+}
+function render(){document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.t===tab));$('#app').innerHTML={dep:vDep,rec:vRec,bud:vBud,set:vSet}[tab]()}
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{tab=b.dataset.t;render();scrollTo(0,0)});
+
+function addTx(){const a=num($('#a').value),m=$('#m').value.trim()||'Dépense';if(!a)return msg('Entre un montant');
+  S.tx.push({id:uid(),date:$('#d').value||day(new Date()),amount:a,merchant:m,card:'',cat:$('#c').value,src:'manual'});S.rules[m]=$('#c').value;save();render()}
+function delTx(id){S.tx=S.tx.filter(t=>t.id!==id);save();render()}
+function setCat(id,c){const t=S.tx.find(x=>x.id===id);S.rules[t.merchant]=c;S.tx.forEach(x=>{if(x.merchant===t.merchant)x.cat=c});save();render()}
+function addRec(){const a=num($('#ra').value),n=$('#rn').value.trim();if(!a||!n)return msg('Nom et montant requis');S.rec.push({id:uid(),name:n,amount:a,per:$('#rp').value});save();render()}
+function delRec(id){S.rec=S.rec.filter(r=>r.id!==id);save();render()}
+function addCat(){const n=$('#nc').value.trim();if(!n||n==='Fixe'||S.cats[n]!==undefined)return;S.cats[n]=0;save();render()}
+function delCat(c){if(Object.keys(S.cats).length<2)return;delete S.cats[c];S.tx.forEach(t=>{if(t.cat===c)t.cat='Autres'});save();render()}
+function exportCsv(){const r=['date;montant;commerçant;catégorie'].concat(S.tx.map(t=>[t.date,t.amount,t.merchant,t.cat].join(';')));
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([r.join('\n')],{type:'text/csv'}));a.download='depenses.csv';a.click()}
+async function sync(){
+  if(!S.url)return;
+  try{
+    const rows=await (await fetch(S.url+'?token='+encodeURIComponent(S.token))).json();
+    if(!Array.isArray(rows))throw 0;
+    const ids=new Set(S.tx.map(t=>t.id));let n=0;
+    rows.forEach(x=>{if(ids.has(x.id))return;const m=x.merchant||'Inconnu';
+      S.tx.push({id:x.id,date:day(x.date),amount:num(x.amount),merchant:m,card:x.card||'',cat:S.rules[m]||'Autres',src:'applepay'});n++});
+    save();msg(n?n+' nouveau(x) paiement(s)':'À jour');render();
+  }catch(e){msg('Synchro impossible : vérifie URL et token')}
+}
+render();sync();
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)sync()});
+if('serviceWorker'in navigator)navigator.serviceWorker.register('sw.js');
+</script></body></html>
